@@ -16,6 +16,31 @@
 
 const BACKEND_URL = "https://api.the-everything-app.com/api/contact-form";
 
+/**
+ * Google Ads click id, captured into the `bb_click` cookie by app/layout.tsx
+ * when the visitor landed from an ad. Same-origin fetch() sends it with the
+ * form post, so no hidden fields are needed however the form is built. Shape
+ * is re-checked here and again by the backend; anything odd is dropped.
+ */
+function readClick(req: Request): { clickId: string; clickIdKind: string; clickAt?: string; landingUrl?: string } | null {
+  try {
+    const cookie = req.headers.get("cookie") || "";
+    const m = cookie.match(/(?:^|;\s*)bb_click=([^;]+)/);
+    if (!m) return null;
+    const r = JSON.parse(decodeURIComponent(m[1])) as { id?: unknown; kind?: unknown; ts?: unknown; landing?: unknown };
+    if (typeof r.id !== "string" || !/^[A-Za-z0-9_-]{8,200}$/.test(r.id)) return null;
+    if (r.kind !== "gclid" && r.kind !== "gbraid" && r.kind !== "wbraid") return null;
+    return {
+      clickId: r.id,
+      clickIdKind: r.kind,
+      clickAt: typeof r.ts === "string" ? r.ts : undefined,
+      landingUrl: typeof r.landing === "string" ? r.landing.slice(0, 500) : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 interface ContactBody {
   name?: string;
   email?: string;
@@ -69,6 +94,7 @@ export async function POST(req: Request) {
         phone: data.phone,
         message: data.message,
         pageUrl: data.pageUrl,
+        ...(readClick(req) ?? {}),
       }),
     });
     const json = await r.json().catch(() => ({}));
